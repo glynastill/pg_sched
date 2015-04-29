@@ -16,7 +16,7 @@ If you require more complex schedules or multi-step tasks try
 ## Command line
 
 ```bash
-$ pg_sched.pl -h <db host> -p <db port> -d <db name> -U <db user> -n <schema> -t <table> -cl <slony clustername> -m <master sets> -l <lock file>
+$ pg_sched.pl -h <db host> -p <db port> -d <db name> -U <db user> -n <schema> -t <table> -cl <slony clustername> -m <master sets> -w <lock file> -l <logfile>
     -h      Hostname of database containing schedule table
             DEFAULT = localhost
     -p      Listening port of database containing schedule table
@@ -33,8 +33,10 @@ $ pg_sched.pl -h <db host> -p <db port> -d <db name> -U <db user> -n <schema> -t
             DEFAULT = auto
     -m      Comma separated list of slony sets on the master. 'all' for all
             DEFAULT = all
-    -l      Lockfile used to prevent concurrent execution of tasks.
+    -w      Lockfile used to prevent concurrent execution of tasks.
             DEFAULT = not used
+    -l      File to log to.
+            DEFAULT = log to STDOUT instead
 ```
 
 ##Example usage
@@ -62,7 +64,7 @@ $ psql -U pg_sched -d mydb -f pg_sched.sql
 Add an entry to run from cron something like:
 
 ```cron
-	* * * * * myuser /home/myuser/pg_sched.pl -d mydb -U pg_sched >> /var/log/pg_sched.log 2>&1
+	* * * * * myuser /home/myuser/pg_sched.pl -d mydb -U pg_sched -l /var/log/pg_sched.log > /dev/null 2>&1
 ```
 
 Insert a row into the table to create a task, e.g:

@@ -47,7 +47,7 @@ my $g_dbschema = 'public';
 my $g_dbtable = 'pg_sched';
 my $g_clname = 'auto';
 my $g_sets = 'all';
-my $g_usage = "pg_sched.pl -h <db host> -p <db port> -d <db name> -U <db user> -n <schema> -t <table> -cl <slony clustername> -m <master sets> -l <lock file>
+my $g_usage = "pg_sched.pl -h <db host> -p <db port> -d <db name> -U <db user> -n <schema> -t <table> -cl <slony clustername> -m <master sets> -w <lock file> -l <logfile>
     -h      Hostname of database containing schedule table
             DEFAULT = $g_dbhost
     -p      Listening port of database containing schedule table 
@@ -64,8 +64,10 @@ my $g_usage = "pg_sched.pl -h <db host> -p <db port> -d <db name> -U <db user> -
             DEFAULT = $g_clname
     -m      Comma separated list of slony sets on the master. 'all' for all
             DEFAULT = $g_sets
-    -l      Lockfile used to prevent concurrent execution of tasks.
+    -w      Lockfile used to prevent concurrent execution of tasks.
             DEFAULT = not used
+    -l      File to log to.
+            DEFAULT = log to STDOUT instead
 ";
 
 my @g_databases;
@@ -73,8 +75,9 @@ my $g_origin = false;
 my @g_pronames;
 my $g_errors;
 my $g_lockfile;
+my $g_logfile;
 
-die $g_usage unless GetOptions(\%opt, 'host|H=s', 'port|p=i', 'dbname|d=s', 'user|U=s', 'schema|n=s', 'table|t=s', 'lockfile|l=s', 'clname|cl=s', 'msets|m=s');
+die $g_usage unless GetOptions(\%opt, 'host|H=s', 'port|p=i', 'dbname|d=s', 'user|U=s', 'schema|n=s', 'table|t=s', 'lockfile|w=s', 'clname|cl=s', 'msets|m=s', 'logfile|l=s');
 
 if (defined($opt{host})) {
     $g_dbhost = $opt{host};
@@ -103,6 +106,9 @@ if (defined($opt{clname})) {
 if (defined($opt{msets})) {
     $g_sets = $opt{msets};
 }
+if (defined($opt{logfile})) {
+    $g_logfile = $opt{logfile};
+}
 
 # If lockfile supplied check if the script is already running
 if (defined($g_lockfile)) {
@@ -124,7 +130,7 @@ foreach my $target_dbname (@g_databases) {
     @g_pronames = (@g_pronames, loadWork($g_dbhost, $g_dbport, $g_dbname, $g_dbuser, $g_dbschema, $g_dbtable, $g_origin, $target_dbname));
 }
 # Do all the work we have collected for all databases
-$g_errors = doWork(\@g_pronames, $g_dbhost, $g_dbport, $g_dbname, $g_dbuser, $g_dbschema, $g_dbtable);
+$g_errors = doWork(\@g_pronames, $g_dbhost, $g_dbport, $g_dbname, $g_dbuser, $g_dbschema, $g_dbtable, $g_logfile);
 
 if ($g_errors > 0) {
     warn ("ERROR: Encountered $g_errors errors processing the schedule\n") if $@;
@@ -157,6 +163,19 @@ sub schedLock{
         };
         die ("unable to remove lock\n") if $@;
     }
+}
+
+sub logFile {
+    my $logfile = shift;
+    my $message = shift;
+
+    eval {
+        open(LOGFILE, ">>", $logfile);
+        flock(LOGFILE, 2);
+        print LOGFILE $message;
+        close (LOGFILE);
+    };
+    warn ("WARNING: unable to log to file $logfile\n") if $@;
 }
 
 sub loadDatabases{
@@ -321,21 +340,22 @@ sub doWork{
     my $dbuser = shift;
     my $dbschema = shift;
     my $dbtable = shift;
+    my $logfile = shift;
     my @workers;
     my @worker_result;
     my $bad = 0;
 
     foreach my $prodef (@$pronames) {
-        my ($t) = threads->new(\&runWorker, $prodef, $dbhost, $dbport, $dbname, $dbuser, $dbschema, $dbtable);
+        my ($t) = threads->new(\&runWorker, $prodef, $dbhost, $dbport, $dbname, $dbuser, $dbschema, $dbtable, $logfile);
         push(@workers,$t);
     }
     foreach (@workers) {
         @worker_result = $_->join;
         if ($worker_result[0] == true) {
-            print("$worker_result[1] [SUCCEEDED]\n");
+            print("$worker_result[1] [SUCCEEDED]\n") if (!defined($logfile));
         }
         else {
-            print("$worker_result[1] [FAILED]\n");
+            print("$worker_result[1] [FAILED]\n") if (!defined($logfile));
             $bad++;
         }
     }
@@ -350,6 +370,7 @@ sub runWorker{
     my $dbuser = shift;
     my $dbschema = shift;
     my $dbtable = shift;
+    my $logfile = shift;
 
     my $dsn;
     my $dbh;
@@ -454,6 +475,10 @@ sub runWorker{
     else {
 		$success = false;
 		$detail .= 'already running PID ' . @$prodef[8];
+    }
+
+    if (defined($logfile)) {
+       logFile($logfile, $detail . ($success?' [SUCCEEDED]':' [FAILED]') . "\n");
     }
 
     return ($success, $detail);
