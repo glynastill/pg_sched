@@ -388,8 +388,7 @@ sub runWorker{
     my $end;
     
     if (!defined(@$prodef[8]) || !kill(0, @$prodef[8])) {
-	    eval {
-			
+        eval {
             eval {
                 $dsn = "DBI:Pg:dbname=$dbname;host=$dbhost;port=$dbport;";
                 $dbh = DBI->connect($dsn, $dbuser);
