@@ -16,6 +16,7 @@ CREATE TABLE pg_sched
   frequency interval NOT NULL,
   frequency_offset interval NOT NULL DEFAULT '0s',
   last_run timestamp,
+  last_completed timestamp,
   enabled node_role NULL DEFAULT 'O', 
   isexclusive boolean NOT NULL DEFAULT true,
   isloose boolean NOT NULL DEFAULT true,

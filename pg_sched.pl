@@ -342,22 +342,30 @@ sub doWork{
     my $dbtable = shift;
     my $logfile = shift;
     my @workers;
+    my $running = 0;
     my @worker_result;
     my $bad = 0;
 
     foreach my $prodef (@$pronames) {
         my ($t) = threads->new(\&runWorker, $prodef, $dbhost, $dbport, $dbname, $dbuser, $dbschema, $dbtable, $logfile);
         push(@workers,$t);
+        $running++;
     }
-    foreach (@workers) {
-        @worker_result = $_->join;
-        if ($worker_result[0] == true) {
-            print("$worker_result[1] [SUCCEEDED]\n") if (!defined($logfile));
+    while ($running > 0) {
+        foreach (@workers) {
+            if ($_->is_joinable()) {
+                @worker_result = $_->join;
+                $running--;
+                if ($worker_result[0] == true) {
+                    print("$worker_result[1] [SUCCEEDED]\n") if (!defined($logfile));
+                }
+                else {
+                    print("$worker_result[1] [FAILED]\n") if (!defined($logfile));
+                    $bad++;
+                }
+            }
         }
-        else {
-            print("$worker_result[1] [FAILED]\n") if (!defined($logfile));
-            $bad++;
-        }
+        sleep(1);
     }
     return $bad;
 }
@@ -379,9 +387,9 @@ sub runWorker{
     my $qw_schedname;
     my @result;
     my $success;
-    my ($g_year, $g_month, $g_day, $g_hour, $g_min, $g_sec) = (localtime(time))[5,4,3,2,1,0];
-    my $timestamp = sprintf ("%02d/%02d/%04d %02d:%02d:%02d", $g_day, $g_month+1, $g_year+1900, $g_hour, $g_min, $g_sec);
-    my $detail = $timestamp . " Schedule: $dbschema.$dbtable Task: id#@$prodef[0] @$prodef[1].@$prodef[2].@$prodef[3](" . 
+    my $run_timestamp = getTimestamp();
+    my $completed_timestamp;
+    my $detail = "Schedule: $dbschema.$dbtable Task: id#@$prodef[0] @$prodef[1].@$prodef[2].@$prodef[3](" . 
                 (defined(@$prodef[4])?join(', ',@{@$prodef[4]}):'') . ") Rep Role: @$prodef[7] User: @$prodef[6] Result: ";
     my $typindex = 0;
     my $start;
@@ -438,6 +446,7 @@ sub runWorker{
             $start = gettimeofday();
             $sth->execute();
             $end = gettimeofday();
+            $completed_timestamp = getTimestamp(); 
 
             while (my @result = $sth->fetchrow) {
                 $success = true;
@@ -453,10 +462,11 @@ sub runWorker{
 
                 $qw_schedname = $dbh->quote_identifier($dbschema) . '.' . $dbh->quote_identifier($dbtable);
 
-                $query = "UPDATE $qw_schedname SET running = NULL, last_run = ?::timestamp WHERE id = ?;";
+                $query = "UPDATE $qw_schedname SET running = NULL, last_run = ?::timestamp, last_completed = ?::timestamp WHERE id = ?;";
                 $sth = $dbh->prepare($query);
-                $sth->bind_param(1, $timestamp);
-                $sth->bind_param(2, @$prodef[0]);
+                $sth->bind_param(1, $run_timestamp);
+                $sth->bind_param(2, $completed_timestamp);
+                $sth->bind_param(3, @$prodef[0]);
                 $sth->execute(); 
                 $sth->finish;
                 $dbh->disconnect();
@@ -476,6 +486,8 @@ sub runWorker{
 		$detail .= 'already running PID ' . @$prodef[8];
     }
 
+    $detail = ($completed_timestamp // $run_timestamp) . " " . $detail;
+
     if (defined($logfile)) {
        logFile($logfile, $detail . ($success?' [SUCCEEDED]':' [FAILED]') . "\n");
     }
@@ -483,3 +495,8 @@ sub runWorker{
     return ($success, $detail);
 }
 
+sub getTimestamp {
+    my ($g_year, $g_month, $g_day, $g_hour, $g_min, $g_sec) = (localtime(time))[5,4,3,2,1,0];
+    my $timestamp = sprintf ("%02d/%02d/%04d %02d:%02d:%02d", $g_day, $g_month+1, $g_year+1900, $g_hour, $g_min, $g_sec);
+    return $timestamp;
+}
